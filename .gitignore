@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# Playwright generated data
+playwright_data/
+state.json
+
+# Temporary patch scripts
+patch_*.py
+fix_*.py
+rewrite_*.py
