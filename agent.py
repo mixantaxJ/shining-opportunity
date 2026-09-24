@@ -49,13 +49,19 @@ Never try to guess refs. Always take a snapshot first to see available elements.
         self.messages.append({"role": "system", "content": prompt})
 
     async def run(self):
-        print(f"Starting agent with objective: {self.objective}")
+        print(f"Starting agent with initial objective: {self.objective}")
+
+        # Initial instruction
+        self.messages.append({
+            "role": "user",
+            "content": "Begin execution. Start by navigating to the relevant website or taking a snapshot if already there."
+        })
+
         async with stdio_client(self.server_params) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
                 self.mcp_session = session
 
-                # Fetch available tools
                 tools_response = await session.list_tools()
                 self.available_tools = []
                 for tool in tools_response.tools:
@@ -70,12 +76,26 @@ Never try to guess refs. Always take a snapshot first to see available elements.
 
                 print(f"Connected to MCP Server. Available tools: {[t['function']['name'] for t in self.available_tools]}")
 
-                # Start loop
-                await self._loop()
+                # Interactive Loop
+                while True:
+                    await self._loop()
 
-                # Keep browser open until user presses Enter
-                print("\nTask finished or stopped.")
-                input("Press Enter to close the browser and exit...\n")
+                    print("\nTask finished or stopped.")
+                    # In asyncio, use run_in_executor to avoid blocking the event loop entirely while waiting for input
+                    loop = asyncio.get_event_loop()
+                    print("Enter next task (or leave empty to exit): ", end="", flush=True)
+                    user_input = await loop.run_in_executor(None, sys.stdin.readline)
+                    user_input = user_input.strip()
+
+                    if not user_input:
+                        print("Exiting...")
+                        break
+
+                    self.objective = user_input
+                    self.messages.append({
+                        "role": "user",
+                        "content": f"New objective: {self.objective}. Please proceed."
+                    })
 
     async def _loop(self):
         # Initial instruction
