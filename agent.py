@@ -73,6 +73,10 @@ Never try to guess refs. Always take a snapshot first to see available elements.
                 # Start loop
                 await self._loop()
 
+                # Keep browser open until user presses Enter
+                print("\nTask finished or stopped.")
+                input("Press Enter to close the browser and exit...\n")
+
     async def _loop(self):
         # Initial instruction
         self.messages.append({
