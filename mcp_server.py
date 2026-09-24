@@ -27,7 +27,7 @@ class BrowserManager:
         self.playwright = await async_playwright().start()
         os.makedirs(USER_DATA_DIR, exist_ok=True)
 
-        headless = True
+        headless = False
         self.context = await self.playwright.chromium.launch_persistent_context(
             user_data_dir=USER_DATA_DIR,
             headless=headless

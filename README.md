@@ -52,3 +52,12 @@ Add the following to your MCP configuration:
 - Type: `stdio`
 - Command: `python`
 - Args: `mcp_server.py` (ensure you use the absolute path or run from this directory).
+
+## Pre-authenticating or Manual Browsing
+Since the agent uses a persistent browser profile (`playwright_data` directory), you can manually open the browser to log in to websites beforehand.
+Just run this helper command in your terminal before starting the agent:
+
+```bash
+python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch_persistent_context('playwright_data', headless=False); page = browser.new_page(); page.pause()"
+```
+This will open a visible Playwright browser. You can navigate, log in to GitHub/HH.ru/etc. When you are done, close the browser window. The session cookies will be saved in `playwright_data` and the agent will use them automatically!
