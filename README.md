@@ -61,3 +61,7 @@ Just run this helper command in your terminal before starting the agent:
 python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch_persistent_context('playwright_data', headless=False); page = browser.new_page(); page.pause()"
 ```
 This will open a visible Playwright browser. You can navigate, log in to GitHub/HH.ru/etc. When you are done, close the browser window. The session cookies will be saved in `playwright_data` and the agent will use them automatically!
+
+
+### ⚠️ Important Note for Claude Code / IDE Users
+Do **not** run `mcp_server.py` manually in your terminal or IDE (like PyCharm). MCP servers communicating over `stdio` are meant to be spawned automatically by the client (Claude Code). If you run it manually, it will wait for JSON-RPC inputs on `stdin` indefinitely and Claude Code will fail to connect with a `-32000` error.
