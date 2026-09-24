@@ -80,29 +80,72 @@ async def browser_snapshot(boxes: bool = False) -> str:
     """Returns Accessibility Tree snapshot with refs."""
     target = browser_manager.current_frame or browser_manager.page
     try:
-        snapshot = await target.accessibility.snapshot(interesting_only=True)
+        # Playwright Python doesn't have page.accessibility, so we use CDP
+        client = await browser_manager.page.context.new_cdp_session(browser_manager.page)
+        snapshot = await client.send("Accessibility.getFullAXTree")
 
         browser_manager.refs = {}
         browser_manager.ref_counter = 0
 
-        def process_node(node):
-            if not node: return None
-            browser_manager.ref_counter += 1
-            ref_id = f"e{browser_manager.ref_counter}"
-            node["ref"] = ref_id
-            browser_manager.refs[ref_id] = {
-                "role": node.get("role"),
-                "name": node.get("name"),
-                "value": node.get("value"),
-            }
-            for child in node.get("children", []):
-                process_node(child)
-            return node
+        # We will parse the CDP AXTree which has a different format
+        # nodes are in snapshot['nodes']
 
-        if snapshot:
-            snapshot = process_node(snapshot)
+        tree_map = {node['nodeId']: node for node in snapshot.get('nodes', [])}
 
-        return json.dumps(snapshot, ensure_ascii=False, indent=2)
+        def process_node(node_id):
+            if node_id not in tree_map: return None
+            node = tree_map[node_id]
+
+            # Extract basic info
+            role = node.get("role", {}).get("value")
+            name = node.get("name", {}).get("value")
+
+            # Check if interactive or has name
+            is_interesting = role in ["button", "link", "textbox", "searchbox", "combobox", "checkbox", "radio", "switch", "slider", "spinbutton", "menuitem", "tab", "treeitem"] or name
+
+            result = {}
+            if is_interesting:
+                browser_manager.ref_counter += 1
+                ref_id = f"e{browser_manager.ref_counter}"
+                result["ref"] = ref_id
+                result["role"] = role
+                result["name"] = name
+
+                # Save to refs for interaction
+                browser_manager.refs[ref_id] = {
+                    "role": role,
+                    "name": name,
+                    "backendNodeId": node.get("backendDOMNodeId")
+                }
+
+            children = []
+            for child_id in node.get("childIds", []):
+                child_result = process_node(child_id)
+                if child_result:
+                    if is_interesting:
+                        children.append(child_result)
+                    else:
+                        # flatten if this node isn't interesting but children are
+                        if isinstance(child_result, list):
+                            children.extend(child_result)
+                        else:
+                            children.append(child_result)
+
+            if is_interesting:
+                if children:
+                    result["children"] = children
+                return result
+            else:
+                return children if children else None
+
+        root_id = snapshot.get("nodes", [{}])[0].get("nodeId")
+        simplified_tree = process_node(root_id) if root_id else []
+
+        # Make sure it's a dict or list for JSON serialization
+        if not isinstance(simplified_tree, list):
+            simplified_tree = [simplified_tree] if simplified_tree else []
+
+        return json.dumps(simplified_tree, ensure_ascii=False, indent=2)
     except Exception as e:
         return f"Snapshot error: {e}"
 
