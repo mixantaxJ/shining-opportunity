@@ -30,10 +30,10 @@ class BrowserManager:
         self.playwright = await async_playwright().start()
         os.makedirs(USER_DATA_DIR, exist_ok=True)
 
-        headless = False
+
         self.context = await self.playwright.chromium.launch_persistent_context(
             user_data_dir=USER_DATA_DIR,
-            headless=False
+            headless=True
         )
         if os.path.exists(STATE_FILE):
             try:
@@ -70,9 +70,8 @@ class BrowserManager:
 
 browser_manager = BrowserManager()
 
-@server.list_tools()
-async def handle_list_tools() -> list[types.Tool]:
-    return [
+async def handle_list_tools(ctx, request: types.ListToolsRequest) -> types.ListToolsResult:
+    tools = [
         types.Tool(
             name="browser_navigate",
             description="Navigates to a URL. Includes built-in networkidle wait.",
@@ -131,11 +130,11 @@ async def handle_list_tools() -> list[types.Tool]:
             }
         )
     ]
+    return types.ListToolsResult(tools=tools)
 
-@server.call_tool()
-async def handle_call_tool(
-    name: str, arguments: dict | None
-) -> list[types.TextContent]:
+async def handle_call_tool(ctx, request: types.CallToolRequest) -> types.CallToolResult:
+    name = request.params.name
+    arguments = request.params.arguments
     if not arguments:
         arguments = {}
 
@@ -148,7 +147,7 @@ async def handle_call_tool(
         await browser_manager.page.goto(url, wait_until="networkidle")
         browser_manager.current_frame = browser_manager.page # reset frame
         await browser_manager.save_state()
-        return [types.TextContent(type="text", text=f"Navigated to {url}")]
+        return types.CallToolResult(content=[types.TextContent(type="text", text=f"Navigated to {url}")])
 
     elif name == "browser_snapshot":
         # We must use accessibility.snapshot as required by the specification.
@@ -183,9 +182,9 @@ async def handle_call_tool(
             if snapshot:
                 snapshot = process_node(snapshot)
 
-            return [types.TextContent(type="text", text=json.dumps(snapshot, ensure_ascii=False, indent=2))]
+            return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(snapshot, ensure_ascii=False, indent=2))])
         except Exception as e:
-            return [types.TextContent(type="text", text=f"Snapshot error: {e}")]
+            return types.CallToolResult(content=[types.TextContent(type="text", text=f"Snapshot error: {e}")])
     elif name == "browser_click":
         ref = arguments.get("ref")
         if not ref or ref not in browser_manager.refs:
@@ -200,9 +199,9 @@ async def handle_call_tool(
             await loc.click()
             await browser_manager.page.wait_for_load_state("networkidle")
             await browser_manager.save_state()
-            return [types.TextContent(type="text", text=f"Clicked on {ref}")]
+            return types.CallToolResult(content=[types.TextContent(type="text", text=f"Clicked on {ref}")])
         except Exception as e:
-            return [types.TextContent(type="text", text=f"Failed to click {ref}: {e}")]
+            return types.CallToolResult(content=[types.TextContent(type="text", text=f"Failed to click {ref}: {e}")])
 
     elif name == "browser_type":
         ref = arguments.get("ref")
@@ -223,9 +222,9 @@ async def handle_call_tool(
                 await loc.press("Enter")
                 await browser_manager.page.wait_for_load_state("networkidle")
             await browser_manager.save_state()
-            return [types.TextContent(type="text", text=f"Typed '{value}' into {ref}")]
+            return types.CallToolResult(content=[types.TextContent(type="text", text=f"Typed '{value}' into {ref}")])
         except Exception as e:
-            return [types.TextContent(type="text", text=f"Failed to type in {ref}: {e}")]
+            return types.CallToolResult(content=[types.TextContent(type="text", text=f"Failed to type in {ref}: {e}")])
 
     elif name == "browser_switch_to_frame":
         # Frame switching by accessibility tree ref is a best-effort using the name (title of iframe)
@@ -236,7 +235,7 @@ async def handle_call_tool(
         node = browser_manager.refs[ref]
         name_val = node.get("name")
         if not name_val:
-            return [types.TextContent(type="text", text=f"Frame {ref} has no name/title to identify it.")]
+            return types.CallToolResult(content=[types.TextContent(type="text", text=f"Frame {ref} has no name/title to identify it.")])
 
         try:
             # Search for frame by name attribute
@@ -248,20 +247,25 @@ async def handle_call_tool(
 
             if frame:
                 browser_manager.current_frame = frame
-                return [types.TextContent(type="text", text=f"Switched to frame {ref}")]
+                return types.CallToolResult(content=[types.TextContent(type="text", text=f"Switched to frame {ref}")])
             else:
-                return [types.TextContent(type="text", text=f"Could not find frame matching name: {name_val}")]
+                return types.CallToolResult(content=[types.TextContent(type="text", text=f"Could not find frame matching name: {name_val}")])
         except Exception as e:
-            return [types.TextContent(type="text", text=f"Failed to switch to frame {ref}: {e}")]
+            return types.CallToolResult(content=[types.TextContent(type="text", text=f"Failed to switch to frame {ref}: {e}")])
     elif name == "browser_ask_user":
         question = arguments.get("question")
         # In stdio transport, we cannot read sys.stdin without breaking JSON-RPC.
         # So we return a directive to the agent/client to prompt the user themselves.
-        return [types.TextContent(type="text", text=f"SYSTEM: To ask this question, you must pause execution and ask the user directly in your chat interface. Question to ask: {question}")]
+        return types.CallToolResult(content=[types.TextContent(type="text", text=f"SYSTEM: To ask this question, you must pause execution and ask the user directly in your chat interface. Question to ask: {question}")])
 
         raise ValueError(f"Unknown tool: {name}")
 
+# Register Handlers
+server.add_request_handler(types.ListToolsRequest.model_fields['method'].default, types.ListToolsRequest, handle_list_tools)
+server.add_request_handler(types.CallToolRequest.model_fields['method'].default, types.CallToolRequest, handle_call_tool)
+
 async def main():
+
     await browser_manager.start()
     try:
         async with stdio_server() as (read_stream, write_stream):
