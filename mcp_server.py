@@ -70,7 +70,13 @@ browser_manager = BrowserManager()
 @mcp_server.tool()
 async def browser_navigate(url: str) -> str:
     """Navigates to a URL. Includes built-in networkidle wait."""
-    await browser_manager.page.goto(url, wait_until="networkidle")
+    try:
+        await browser_manager.page.goto(url, wait_until="networkidle", timeout=10000)
+    except Exception:
+        try:
+            await browser_manager.page.goto(url, wait_until="load", timeout=10000)
+        except Exception:
+            pass
     browser_manager.current_frame = browser_manager.page
     await browser_manager.save_state()
     return f"Navigated to {url}"
@@ -158,12 +164,31 @@ async def browser_click(ref: str) -> str:
 
     try:
         node = browser_manager.refs[ref]
-        role = node.get('role', 'generic')
-        name_val = node.get('name')
-        loc = target.get_by_role(role, name=name_val) if name_val else target.get_by_role(role)
-        loc = loc.first
+        backend_id = node.get('backendNodeId')
+
+        # Resolve the exact node via CDP to inject a unique attribute
+        client = await browser_manager.page.context.new_cdp_session(browser_manager.page)
+        obj = await client.send("DOM.resolveNode", {"backendNodeId": backend_id})
+        object_id = obj.get("object", {}).get("objectId")
+
+        if object_id:
+            await client.send("Runtime.callFunctionOn", {
+                "objectId": object_id,
+                "functionDeclaration": f"function() {{ this.setAttribute('data-mcp-ref', '{ref}'); }}"
+            })
+            loc = browser_manager.page.locator(f"[data-mcp-ref='{ref}']")
+        else:
+            # Fallback to role if CDP resolve fails
+            role = node.get('role', 'generic')
+            name_val = node.get('name')
+            loc = target.get_by_role(role, name=name_val) if name_val else target.get_by_role(role)
+            loc = loc.first
+
         await loc.click()
-        await browser_manager.page.wait_for_load_state("networkidle")
+        try:
+            await browser_manager.page.wait_for_load_state("networkidle", timeout=3000)
+        except Exception:
+            pass
         await browser_manager.save_state()
         return f"Clicked on {ref}"
     except Exception as e:
@@ -178,14 +203,31 @@ async def browser_type(ref: str, value: str, press_enter: bool = False) -> str:
 
     try:
         node = browser_manager.refs[ref]
-        role = node.get('role', 'generic')
-        name_val = node.get('name')
-        loc = target.get_by_role(role, name=name_val) if name_val else target.get_by_role(role)
-        loc = loc.first
+        backend_id = node.get('backendNodeId')
+
+        client = await browser_manager.page.context.new_cdp_session(browser_manager.page)
+        obj = await client.send("DOM.resolveNode", {"backendNodeId": backend_id})
+        object_id = obj.get("object", {}).get("objectId")
+
+        if object_id:
+            await client.send("Runtime.callFunctionOn", {
+                "objectId": object_id,
+                "functionDeclaration": f"function() {{ this.setAttribute('data-mcp-ref', '{ref}'); }}"
+            })
+            loc = browser_manager.page.locator(f"[data-mcp-ref='{ref}']")
+        else:
+            role = node.get('role', 'generic')
+            name_val = node.get('name')
+            loc = target.get_by_role(role, name=name_val) if name_val else target.get_by_role(role)
+            loc = loc.first
+
         await loc.fill(value)
         if press_enter:
             await loc.press("Enter")
-            await browser_manager.page.wait_for_load_state("networkidle")
+            try:
+                await browser_manager.page.wait_for_load_state("networkidle", timeout=3000)
+            except Exception:
+                pass
         await browser_manager.save_state()
         return f"Typed '{value}' into {ref}"
     except Exception as e:
